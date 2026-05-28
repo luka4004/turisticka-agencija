@@ -46,6 +46,9 @@ def get_rezervacije():
             (Rezervacija.status.like(f"%{search}%"))
         )
 
+    if drzava:
+        query = query.filter(Destinacija.drzava == drzava)
+
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
     return jsonify({
