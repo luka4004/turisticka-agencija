@@ -33,6 +33,7 @@ def rezervacija_to_dict(rezervacija):
 @rezervacije_bp.route("/rezervacije", methods=["GET"])
 def get_rezervacije():
     search = request.args.get("search", "")
+    drzava = request.args.get("drzava", "")
     page = request.args.get("page", 1, type=int)
     per_page = request.args.get("per_page", 5, type=int)
 
