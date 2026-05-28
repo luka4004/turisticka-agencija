@@ -44,6 +44,7 @@ def get_rezervacije():
             (Klijent.ime.like(f"%{search}%")) |
             (Klijent.prezime.like(f"%{search}%")) |
             (Destinacija.naziv.like(f"%{search}%")) |
+            (Destinacija.drzava.like(f"%{search}%")) |
             (Rezervacija.status.like(f"%{search}%"))
         )
 
