@@ -1,4 +1,4 @@
-# turisticka-agencija-frontend
+# turisticka-agencija
 
 Scaffolded with Vuetify CLI.
 
