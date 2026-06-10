@@ -1,38 +1,36 @@
 <template>
   <v-app>
-    <AppHeader />
-
     <v-main>
-      <v-container>
-        <v-tabs v-model="tab" class="mb-6">
-          <v-tab value="dashboard">Dashboard</v-tab>
-          <v-tab value="destinacije">Destinacije</v-tab>
-          <v-tab value="klijenti">Klijenti</v-tab>
-          <v-tab value="zaposlenici">Zaposlenici</v-tab>
-          <v-tab value="rezervacije">Rezervacije</v-tab>
+      <v-container class="main-container">
+        <v-tabs class="custom-tabs">
+          <v-tab to="/home">Početna</v-tab>
+          <v-tab to="/dashboard">Dashboard</v-tab>
+          <v-tab to="/destinacije">Destinacije</v-tab>
+          <v-tab to="/klijenti">Klijenti</v-tab>
+          <v-tab to="/zaposlenici">Zaposlenici</v-tab>
+          <v-tab to="/rezervacije">Rezervacije</v-tab>
         </v-tabs>
 
-        <v-window v-model="tab">
-          <v-window-item value="dashboard">
-            <DashboardCards :cards="dashboardCards" />
-          </v-window-item>
+        <div class="content-window">
+          <PublicHome v-if="currentPage === 'home'" />
+          
+          <DashboardCards
+            v-else-if="currentPage === 'dashboard'"
+            :cards="dashboardCards"
+          />
 
-          <v-window-item
-            v-for="entityKey in entityKeys"
-            :key="entityKey"
-            :value="entityKey"
-          >
-            <EntityCrud
-              :entity-key="entityKey"
-              :config="configs[entityKey]"
-              :state="state[entityKey]"
-              @open-create="openCreate"
-              @open-edit="openEdit"
-              @confirm-delete="confirmDelete"
-              @load-entity="loadEntity"
-            />
-          </v-window-item>
-        </v-window>
+          <EntityCrud
+            v-else
+            :entity-key="currentPage"
+            :config="configs[currentPage]"
+            :state="state[currentPage]"
+            @open-create="openCreate"
+            @open-edit="openEdit"
+            @confirm-delete="confirmDelete"
+            @load-entity="loadEntity"
+            @finish-reservation="finishReservation"
+          />
+        </div>
       </v-container>
 
       <EntityFormDialog
@@ -57,16 +55,22 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 
-import AppHeader from "./components/AppHeader.vue";
 import DashboardCards from "./components/DashboardCards.vue";
 import EntityCrud from "./components/EntityCrud.vue";
 import EntityFormDialog from "./components/EntityFormDialog.vue";
 import DeleteConfirmDialog from "./components/DeleteConfirmDialog.vue";
+import PublicHome from "./components/PublicHome.vue";
 
 const API = "http://127.0.0.1:5000/api";
 
-const tab = ref("dashboard");
+const route = useRoute();
+
+const currentPage = computed(() => {
+  return route.name || "dashboard";
+});
+
 const dialog = ref(false);
 const deleteDialog = ref(false);
 const editMode = ref(false);
@@ -105,6 +109,7 @@ function createState() {
   return {
     items: [],
     search: "",
+    country: "Sve države",
     page: 1,
     perPage: 5,
     pages: 1,
@@ -189,7 +194,7 @@ const configs = computed(() => ({
       },
       {
         key: "destinacija_id",
-        label: "Destinacija",
+        label: "Slobodna destinacija",
         type: "select",
         items: destinacijaOptions.value,
       },
@@ -228,9 +233,13 @@ async function loadEntity(entityKey) {
   const currentState = state[entityKey];
   const path = configs.value[entityKey].path;
 
-  const url = `${API}/${path}?search=${encodeURIComponent(
+  let url = `${API}/${path}?search=${encodeURIComponent(
     currentState.search || ""
   )}&page=${currentState.page}&per_page=${currentState.perPage}`;
+
+  if (entityKey === "rezervacije" && currentState.country !== "Sve države") {
+    url += `&drzava=${encodeURIComponent(currentState.country)}`;
+  }
 
   const res = await fetch(url);
   const data = await res.json();
@@ -263,10 +272,21 @@ async function loadSelectOptions() {
   const destinacijeRes = await fetch(`${API}/destinacije?page=1&per_page=100`);
   const destinacijeData = await destinacijeRes.json();
 
-  destinacijaOptions.value = (destinacijeData.items || destinacijeData).map((d) => ({
-    title: `${d.naziv} - ${d.grad}`,
-    value: d.id,
-  }));
+  const rezervacijeRes = await fetch(`${API}/rezervacije?page=1&per_page=100`);
+  const rezervacijeData = await rezervacijeRes.json();
+
+  const zauzeteDestinacije = new Set(
+    (rezervacijeData.items || rezervacijeData)
+      .filter((r) => r.status === "aktivna")
+      .map((r) => r.destinacija_id)
+  );
+
+  destinacijaOptions.value = (destinacijeData.items || destinacijeData)
+    .filter((d) => !zauzeteDestinacije.has(d.id))
+    .map((d) => ({
+      title: `${d.naziv} - ${d.grad} / slobodna`,
+      value: d.id,
+    }));
 }
 
 function resetForm() {
@@ -386,13 +406,146 @@ async function deleteItem() {
   await loadSelectOptions();
 }
 
-watch(tab, async (newTab) => {
-  if (newTab === "dashboard") {
+async function finishReservation(item) {
+  await fetch(`${API}/rezervacije/${item.id}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      klijent_id: item.klijent_id,
+      destinacija_id: item.destinacija_id,
+      datum_rezervacije: item.datum_rezervacije,
+      broj_osoba: item.broj_osoba,
+      status: "završena",
+    }),
+  });
+
+  await loadEntity("rezervacije");
+  await loadSelectOptions();
+  await loadDashboard();
+}
+
+watch(currentPage, async (newPage) => {
+  if (newPage === "dashboard") {
     await loadDashboard();
-  } else if (entityKeys.includes(newTab)) {
-    await loadEntity(newTab);
+  } else if (entityKeys.includes(newPage)) {
+    await loadEntity(newPage);
   }
 });
 
 onMounted(loadAll);
 </script>
+
+<style scoped>
+.main-container {
+  width: 100%;
+  max-width: 1180px;
+  padding-top: 28px;
+  padding-bottom: 60px;
+}
+
+.custom-tabs {
+  width: fit-content;
+  min-width: 720px;
+  background: linear-gradient(135deg, #1565c0, #26a69a);
+  border-radius: 18px;
+  padding: 10px 14px;
+  margin: 0 auto 28px auto;
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.35);
+}
+
+.custom-tabs :deep(.v-tab) {
+  color: white;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  border-radius: 14px;
+  margin-right: 8px;
+  min-width: 120px;
+}
+
+.custom-tabs :deep(.v-tab--selected) {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.content-window {
+  max-width: 1180px;
+  margin: 0 auto;
+  background: #181818;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 22px;
+  padding: 32px;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
+}
+
+.content-window :deep(h1) {
+  font-size: 34px;
+  margin-bottom: 26px;
+}
+
+.content-window :deep(.v-card),
+.content-window :deep(.v-table),
+.content-window :deep(.v-field) {
+  border-radius: 16px;
+}
+
+.content-window :deep(.v-row) {
+  row-gap: 18px;
+}
+
+@media (max-width: 850px) {
+  .custom-tabs {
+    width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+  }
+
+  .content-window {
+    padding: 22px;
+  }
+}
+
+.custom-tabs {
+  width: fit-content;
+  min-width: 720px;
+  height: 52px;
+  background: linear-gradient(135deg, #1565c0, #26a69a);
+  border-radius: 18px;
+  padding: 6px 14px;
+  margin: 0 auto 28px auto;
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.35);
+  overflow: visible;
+}
+
+.custom-tabs :deep(.v-slide-group__container) {
+  overflow: visible;
+}
+
+.custom-tabs :deep(.v-slide-group__content) {
+  align-items: center;
+}
+
+.custom-tabs :deep(.v-tab) {
+  height: 40px;
+  min-width: 120px;
+  color: white;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  border-radius: 14px;
+  margin-right: 8px;
+}
+
+.custom-tabs :deep(.v-tab--selected) {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.custom-tabs :deep(.v-btn__content) {
+  height: 40px;
+  line-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+</style>
